@@ -431,7 +431,7 @@
 (function () {
   "use strict";
 
-  var APP_VERSION = "2.9.3";
+  var APP_VERSION = "2.9.4";
 
   /* Featured stream URLs verified working 2026-09-14.
      Artwork URLs verified loading 2026-09-14; img:null gets a built-in art tile.
@@ -457,7 +457,7 @@
     { name: "Exclusively Guns N' Roses", genre: "Guns N' Roses 24/7", url: "https://streaming.exclusive.radio/er/gunsnroses/icecast.audio", img: null,
       np: { t: "icy", url: "https://streaming.exclusive.radio/er/gunsnroses/icecast.audio" } },
     { name: "Megarock Radio 320k", genre: "Metal / Hard rock", url: "https://stream3.megarockradio.net:80/", img: null,
-      np: { t: "icecast", url: "https://stream3.megarockradio.net/status-json.xsl" } },
+      np: { t: "icecast", url: "https://stream3.megarockradio.net/status-json.xsl", mount: "/stream" } },
     { name: "Rock Antenne Heavy Metal", genre: "Heavy metal", url: "https://stream.rockantenne.de/heavy-metal/stream/mp3", img: "https://www.rockantenne.de/logos/station-rock-antenne/apple-touch-icon.png" },
     { name: "Best Of Rock.FM Alternative Rock", genre: "Alternative rock", url: "https://bestofrockfm.stream.vip/altrock/mp3-256/bestofrock.fm/", img: "https://www.best-of-rock.fm/favicons/apple-touch-icon.png" },
     { name: "RdMix Classic Rock", genre: "Classic rock", url: "https://cast1.torontocast.com:4610/stream", img: "https://static.wixstatic.com/media/f361b3_1bad7e5fb9a54196b2ac2c2fe71d6e4f~mv2.jpg",
@@ -1043,9 +1043,18 @@
             if (metaLen > 0) {
               var chars = buf.subarray(pos + metaint + 1, pos + metaint + 1 + metaLen);
               var meta = "";
-              for (var i = 0; i < chars.length; i++) meta += String.fromCharCode(chars[i]);
+              try {
+                if (typeof TextDecoder !== "undefined") meta = new TextDecoder("utf-8").decode(chars);
+                else { for (var i = 0; i < chars.length; i++) meta += String.fromCharCode(chars[i]); }
+              } catch (e) {
+                meta = "";
+                for (var j = 0; j < chars.length; j++) meta += String.fromCharCode(chars[j]);
+              }
               try { reader.cancel(); } catch (e) {}
-              var m = /StreamTitle='([^']*)'/.exec(meta);
+              /* Match up to the closing '; -- NOT the next apostrophe. Song titles like
+                 "Guns N' Roses - Sweet Child O' Mine" contain apostrophes, and the old
+                 [^']* pattern cut them off at the first one (announcing just "Guns N"). */
+              var m = /StreamTitle='(.*?)';/.exec(meta);
               return (m && m[1]) ? m[1] : null;
             }
             pos += metaint + metaLen + 1;
@@ -1099,8 +1108,17 @@
             var src = d && d.icestats && d.icestats.source;
             if (!src) return null;
             var arr = Object.prototype.toString.call(src) === "[object Array]" ? src : [src];
-            for (var i = 0; i < arr.length; i++) {
-              if (arr[i] && arr[i].title) { var t = cleanSong(arr[i].title); if (t) return t; }
+            /* Prefer the mount this station actually plays (np.mount, e.g. "/stream").
+               This server also lists a /test mount; taking the first source blindly
+               could announce the wrong mount's song. */
+            var ordered = [];
+            for (var k = 0; k < arr.length; k++) {
+              var lu = String((arr[k] && arr[k].listenurl) || "");
+              if (np.mount && lu.indexOf(np.mount) !== -1) ordered.unshift(arr[k]);
+              else ordered.push(arr[k]);
+            }
+            for (var i = 0; i < ordered.length; i++) {
+              if (ordered[i] && ordered[i].title) { var t = cleanSong(ordered[i].title); if (t) return t; }
             }
             return null;
           });
