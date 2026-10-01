@@ -27,8 +27,8 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     env:
-      APP_VERSION_NAME: ${{ inputs.version_name || '2.8' }}
-      APP_VERSION_CODE: ${{ inputs.version_code || '1' }}
+      APP_VERSION_NAME: ${{ inputs.version_name || '2.9' }}
+      APP_VERSION_CODE: ${{ inputs.version_code || '3' }}
       APP_RELEASE_NOTES: ${{ inputs.release_notes || 'Update' }}
     steps:
       - name: Check out code
@@ -119,6 +119,8 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
               <application
                   android:label="Metal Radio"
                   android:theme="@android:style/Theme.Material.Light.NoActionBar">
@@ -131,6 +133,10 @@ jobs:
                           <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
                   </activity>
+                  <service
+                      android:name="com.metalradio.app.RadioService"
+                      android:exported="false"
+                      android:foregroundServiceType="mediaPlayback" />
               </application>
           </manifest>
           EOF
@@ -141,6 +147,7 @@ jobs:
           import android.app.Activity;
           import android.content.Intent;
           import android.net.Uri;
+          import android.os.Build;
           import android.os.Bundle;
           import android.provider.Settings;
           import android.speech.tts.TextToSpeech;
@@ -252,6 +259,49 @@ jobs:
                           });
                       }
                   }, "LynxosBattery");
+                  // Station playback runs in a foreground service (RadioService) with a
+                  // persistent notification, which is what Android requires to keep audio
+                  // playing when the screen turns off. The JS surface is unchanged:
+                  // play/stop/setVolume, and the service reports stream errors back
+                  // through window.mrNativeError().
+                  RadioService.setErrorListener(new RadioService.ErrorListener() {
+                      @Override
+                      public void onRadioError() {
+                          notifyRadioError();
+                      }
+                  });
+                  webView.addJavascriptInterface(new Object() {
+                      @JavascriptInterface
+                      public void play(final String url) {
+                          try {
+                              Intent i = new Intent(MainActivity.this, RadioService.class)
+                                  .setAction(RadioService.ACTION_PLAY)
+                                  .putExtra(RadioService.EXTRA_URL, url);
+                              if (Build.VERSION.SDK_INT >= 26) {
+                                  startForegroundService(i);
+                              } else {
+                                  startService(i);
+                              }
+                          } catch (Exception e) {
+                              notifyRadioError();
+                          }
+                      }
+                      @JavascriptInterface
+                      public void stop() {
+                          try {
+                              startService(new Intent(MainActivity.this, RadioService.class)
+                                  .setAction(RadioService.ACTION_STOP));
+                          } catch (Exception ignored) {}
+                      }
+                      @JavascriptInterface
+                      public void setVolume(final float v) {
+                          try {
+                              startService(new Intent(MainActivity.this, RadioService.class)
+                                  .setAction(RadioService.ACTION_SET_VOLUME)
+                                  .putExtra(RadioService.EXTRA_VOLUME, v));
+                          } catch (Exception ignored) {}
+                      }
+                  }, "LynxosRadio");
                   if (savedInstanceState != null) {
                       webView.restoreState(savedInstanceState);
                   } else {
@@ -260,6 +310,20 @@ jobs:
                   setContentView(webView);
               }
 
+
+              private void notifyRadioError() {
+                  try {
+                      final WebView wv = webView;
+                      if (wv != null) {
+                          wv.post(new Runnable() {
+                              @Override
+                              public void run() {
+                                  try { wv.evaluateJavascript("if (window.mrNativeError) window.mrNativeError();", null); } catch (Exception ignored) {}
+                              }
+                          });
+                      }
+                  } catch (Exception ignored) {}
+              }
 
               @Override
               protected void onDestroy() {
@@ -270,6 +334,10 @@ jobs:
                       } catch (Exception ignored) {}
                       tts = null;
                   }
+                  try {
+                      startService(new Intent(this, RadioService.class).setAction(RadioService.ACTION_STOP));
+                  } catch (Exception ignored) {}
+                  RadioService.setErrorListener(null);
                   super.onDestroy();
               }
 
@@ -292,6 +360,180 @@ jobs:
           }
           EOF
 
+          cat > app/src/main/java/com/metalradio/app/RadioService.java <<'EOF'
+          package com.metalradio.app;
+
+          import android.app.Notification;
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.app.PendingIntent;
+          import android.app.Service;
+          import android.content.Intent;
+          import android.content.pm.ServiceInfo;
+          import android.media.AudioAttributes;
+          import android.media.MediaPlayer;
+          import android.os.Build;
+          import android.os.IBinder;
+          import android.os.PowerManager;
+
+          // Station playback. A foreground service with a persistent notification is
+          // what Android requires to keep audio playing when the screen turns off;
+          // a wake lock alone gets suspended by the system.
+          public class RadioService extends Service {
+              public static final String ACTION_PLAY = "com.metalradio.app.RadioService.PLAY";
+              public static final String ACTION_STOP = "com.metalradio.app.RadioService.STOP";
+              public static final String ACTION_SET_VOLUME = "com.metalradio.app.RadioService.SET_VOLUME";
+              public static final String EXTRA_URL = "url";
+              public static final String EXTRA_VOLUME = "volume";
+
+              private static final int NOTIF_ID = 4201;
+              private static final String CHANNEL_ID = "metal_radio";
+
+              private MediaPlayer player;
+              private static volatile ErrorListener errorListener;
+
+              public interface ErrorListener {
+                  void onRadioError();
+              }
+
+              public static void setErrorListener(ErrorListener l) {
+                  errorListener = l;
+              }
+
+              @Override
+              public IBinder onBind(Intent intent) {
+                  return null;
+              }
+
+              @Override
+              public void onCreate() {
+                  super.onCreate();
+                  createChannel();
+              }
+
+              @Override
+              public int onStartCommand(Intent intent, int flags, int startId) {
+                  if (intent == null) {
+                      return START_NOT_STICKY;
+                  }
+                  String action = intent.getAction();
+                  if (ACTION_PLAY.equals(action)) {
+                      goForeground();
+                      playUrl(intent.getStringExtra(EXTRA_URL));
+                  } else if (ACTION_STOP.equals(action)) {
+                      stopPlayback();
+                      try { stopForeground(true); } catch (Exception ignored) {}
+                      stopSelf();
+                  } else if (ACTION_SET_VOLUME.equals(action)) {
+                      float v = intent.getFloatExtra(EXTRA_VOLUME, 0.8f);
+                      try {
+                          if (player != null) player.setVolume(v, v);
+                      } catch (Exception ignored) {}
+                  }
+                  return START_NOT_STICKY;
+              }
+
+              @Override
+              public void onDestroy() {
+                  stopPlayback();
+                  super.onDestroy();
+              }
+
+              private void createChannel() {
+                  if (Build.VERSION.SDK_INT >= 26) {
+                      try {
+                          NotificationChannel ch = new NotificationChannel(
+                              CHANNEL_ID, "Metal Radio", NotificationManager.IMPORTANCE_LOW);
+                          ch.setDescription("Metal Radio station playback");
+                          NotificationManager nm = getSystemService(NotificationManager.class);
+                          if (nm != null) nm.createNotificationChannel(ch);
+                      } catch (Exception ignored) {}
+                  }
+              }
+
+              private void goForeground() {
+                  try {
+                      Intent open = new Intent(this, MainActivity.class);
+                      open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                      int pflags = PendingIntent.FLAG_UPDATE_CURRENT;
+                      if (Build.VERSION.SDK_INT >= 23) {
+                          pflags |= PendingIntent.FLAG_IMMUTABLE;
+                      }
+                      PendingIntent pi = PendingIntent.getActivity(this, 0, open, pflags);
+                      Notification.Builder b;
+                      if (Build.VERSION.SDK_INT >= 26) {
+                          b = new Notification.Builder(this, CHANNEL_ID);
+                      } else {
+                          b = new Notification.Builder(this);
+                      }
+                      Notification n = b.setContentTitle("Metal Radio")
+                          .setContentText("Playing — open Metal Radio to stop")
+                          .setSmallIcon(android.R.drawable.ic_lock_silent_mode_off)
+                          .setContentIntent(pi)
+                          .setOngoing(true)
+                          .build();
+                      if (Build.VERSION.SDK_INT >= 29) {
+                          startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+                      } else {
+                          startForeground(NOTIF_ID, n);
+                      }
+                  } catch (Exception ignored) {}
+              }
+
+              private void playUrl(final String url) {
+                  stopPlayback();
+                  if (url == null || url.isEmpty()) {
+                      reportError();
+                      return;
+                  }
+                  try {
+                      player = new MediaPlayer();
+                      player.setAudioAttributes(new AudioAttributes.Builder()
+                          .setUsage(AudioAttributes.USAGE_MEDIA)
+                          .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                          .build());
+                      player.setWakeMode(getApplicationContext(), PowerManager.PARTIAL_WAKE_LOCK);
+                      player.setDataSource(url);
+                      player.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
+                          @Override
+                          public void onPrepared(MediaPlayer mp) {
+                              try { mp.start(); } catch (Exception e) { reportError(); }
+                          }
+                      });
+                      player.setOnErrorListener(new MediaPlayer.OnErrorListener() {
+                          @Override
+                          public boolean onError(MediaPlayer mp, int what, int extra) {
+                              stopPlayback();
+                              reportError();
+                              return true;
+                          }
+                      });
+                      player.prepareAsync();
+                  } catch (Exception e) {
+                      stopPlayback();
+                      reportError();
+                  }
+              }
+
+              private void stopPlayback() {
+                  try {
+                      if (player != null) {
+                          try { player.stop(); } catch (Exception ignored) {}
+                          try { player.release(); } catch (Exception ignored) {}
+                          player = null;
+                      }
+                  } catch (Exception ignored) {}
+              }
+
+              private void reportError() {
+                  try {
+                      ErrorListener l = errorListener;
+                      if (l != null) l.onRadioError();
+                  } catch (Exception ignored) {}
+              }
+          }
+          EOF
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -303,7 +545,7 @@ jobs:
       - name: Sign release APK with the Lynxos key
         run: |
           export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          APKSIGNER="$ANDROID_HOME/build-tools/34.0.0/apksigner"
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > /tmp/lynxos-release.p12
           "$APKSIGNER" sign --ks /tmp/lynxos-release.p12 --ks-type PKCS12 \
             --ks-pass "pass:${{ secrets.KEYSTORE_PASSWORD }}" \
