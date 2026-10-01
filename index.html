@@ -62,6 +62,19 @@
   body.tv ul.station-grid { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; }
   body.tv li.station-card.playing { border-width: 4px; }
   body.tv input, body.tv select { font-size: 24px; min-height: 72px; }
+  /* TV player overlay: fill more of the 10-foot screen */
+  body.tv .po-card { max-width: 640px; }
+  body.tv .po-art { width: min(40vh, 320px); }
+  body.tv #po-name { font-size: 40px; }
+  body.tv #po-genre { font-size: 24px; }
+  body.tv #po-status { font-size: 24px; }
+  body.tv #po-song { font-size: 30px; }
+  body.tv .po-big { width: 150px; height: 150px; min-height: 150px; font-size: 60px; }
+  body.tv .po-small { width: 92px; height: 92px; min-height: 92px; font-size: 40px; }
+  body.tv .po-x { width: 76px; height: 76px; min-height: 76px; font-size: 30px; }
+  /* TV: battery help doesn't exist on televisions — remove it entirely */
+  body.tv #battdlg { display: none !important; }
+  body.tv #btn-batt2 { display: none !important; }
 
   section.block { margin: 22px 0; }
   section.block h2 { font-size: 26px; color: #ffd60a; margin: 0 0 10px 0; border-bottom: 2px solid #333; padding-bottom: 6px; }
@@ -448,7 +461,7 @@
 (function () {
   "use strict";
 
-  var APP_VERSION = "2.9.5";
+  var APP_VERSION = "2.9.6";
 
   /* TV mode: Fire TV (AFT*), Android TV / Google TV remotes drive D-pad focus.
      Enlarge the UI and strengthen the focus ring when running on a television. */
@@ -906,6 +919,14 @@
     } catch (e) {}
     if (!current || current.url !== url) playStation(name, url);
     else syncOverlayPlayState();
+    /* TV: move the remote's focus into the overlay, otherwise the arrow keys
+       keep wandering the station list hidden behind it. */
+    if (typeof IS_TV !== "undefined" && IS_TV) {
+      try {
+        var tgl = document.getElementById("po-toggle");
+        if (tgl) tgl.focus();
+      } catch (e) {}
+    }
   }
 
   function closePlayer(fromPop) {
@@ -915,6 +936,21 @@
     try {
       if (!fromPop && history.state && history.state.mrplayer) history.back();
     } catch (e) {}
+    /* TV: hand the remote's focus back to the station that was playing. */
+    if (typeof IS_TV !== "undefined" && IS_TV && playerStation) {
+      try {
+        var cards = document.querySelectorAll("li.station-card");
+        var target = null;
+        for (var i = 0; i < cards.length; i++) {
+          if (cards[i].getAttribute("data-url") === playerStation.url) {
+            target = cards[i].querySelector("button.play-btn");
+            break;
+          }
+        }
+        if (!target) target = document.querySelector("button.play-btn");
+        if (target) target.focus();
+      } catch (e) {}
+    }
   }
 
   window.addEventListener("popstate", function () {
@@ -1402,10 +1438,15 @@
   /* ---------- battery tip dialog ---------- */
   var battDlg = document.getElementById("battdlg");
   var isAndroid = /Android/i.test(navigator.userAgent || "");
+  /* TV has no battery optimization to exempt — the dialog and its settings
+     button are hidden by CSS (body.tv), and the opener is disabled here so
+     the system settings screen can never trap the remote. */
+  var battDisabledTV = (typeof IS_TV !== "undefined" && IS_TV);
   if (!isAndroid) {
     document.getElementById("batt-open").textContent = "Read the steps aloud";
   }
   document.getElementById("batt-open").addEventListener("click", function () {
+    if (battDisabledTV) { battDlg.hidden = true; return; }
     try {
       if (window.LynxosBattery && typeof window.LynxosBattery.requestExemption === "function") {
         window.LynxosBattery.requestExemption();
@@ -1925,7 +1966,7 @@
   document.getElementById("app-version2").textContent = APP_VERSION;
   renderAll();
   updateNpVisibility();
-  if (!store.get("mr_batt_tip")) battDlg.hidden = false;
+  if (!store.get("mr_batt_tip") && !battDisabledTV) battDlg.hidden = false;
   if (lastStation) {
     setStatus("Stopped. Last played: " + lastStation.name + ". Tap Resume last to play it.");
   }
