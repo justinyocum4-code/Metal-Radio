@@ -46,6 +46,23 @@
   :focus-visible { outline: 4px solid #fff; outline-offset: 2px; }
   [hidden] { display: none !important; }
 
+  /* ---------- TV / 10-foot mode (Fire TV, Android TV): body.tv is set by JS
+     when a TV user agent is detected. Bigger text, stronger focus ring for
+     D-pad navigation with the remote. */
+  body.tv { font-size: 24px; }
+  body.tv #nowplaying .np-label { font-size: 20px; }
+  body.tv #np-station { font-size: 36px; }
+  body.tv #np-status { font-size: 22px; }
+  body.tv #np-song, body.tv #po-song { font-size: 28px; min-height: 34px; }
+  body.tv button { font-size: 26px; min-height: 88px; padding: 16px 28px; }
+  body.tv button.small { min-height: 76px; font-size: 24px; padding: 14px 20px; }
+  body.tv :focus-visible { outline: 6px solid #ffd60a; outline-offset: 4px; }
+  body.tv section.block h2 { font-size: 36px; }
+  body.tv section.block p.hint { font-size: 22px; }
+  body.tv ul.station-grid { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; }
+  body.tv li.station-card.playing { border-width: 4px; }
+  body.tv input, body.tv select { font-size: 24px; min-height: 72px; }
+
   section.block { margin: 22px 0; }
   section.block h2 { font-size: 26px; color: #ffd60a; margin: 0 0 10px 0; border-bottom: 2px solid #333; padding-bottom: 6px; }
   section.block p.hint { color: #ccc; font-size: 17px; margin: 0 0 10px 0; }
@@ -431,7 +448,12 @@
 (function () {
   "use strict";
 
-  var APP_VERSION = "2.9.4";
+  var APP_VERSION = "2.9.5";
+
+  /* TV mode: Fire TV (AFT*), Android TV / Google TV remotes drive D-pad focus.
+     Enlarge the UI and strengthen the focus ring when running on a television. */
+  var IS_TV = /AFT|Fire TV|Android TV|Google TV|Leanback/i.test(navigator.userAgent || "");
+  try { if (IS_TV) document.body.classList.add("tv"); } catch (e) {}
 
   /* Featured stream URLs verified working 2026-09-14.
      Artwork URLs verified loading 2026-09-14; img:null gets a built-in art tile.
@@ -712,6 +734,13 @@
       ul.appendChild(stationCard(s.name, s.genre, s.url, s.img));
     });
     markPlayingCard();
+    /* TV: give the remote a starting focus point on the first station. */
+    if (typeof IS_TV !== "undefined" && IS_TV) {
+      try {
+        var first = ul.querySelector("button.play-btn");
+        if (first && !document.querySelector("button.play-btn:focus")) first.focus();
+      } catch (e) {}
+    }
   }
   (function () {
     var chips = document.querySelectorAll("[data-gfilter]");
