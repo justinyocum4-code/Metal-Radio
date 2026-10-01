@@ -26,6 +26,8 @@
   #nowplaying .np-label { font-size: 15px; color: #ffd60a; text-transform: uppercase; letter-spacing: 1px; }
   #np-station { font-size: 24px; font-weight: bold; margin: 4px 0 2px 0; }
   #np-status { font-size: 17px; color: #ccc; margin: 0 0 10px 0; }
+  #np-song { font-size: 19px; color: #ffd60a; margin: 0 0 10px 0; min-height: 24px; font-weight: bold; }
+  #po-song { font-size: 19px; color: #ffd60a; margin: 0 0 14px 0; min-height: 26px; font-weight: bold; }
   .np-controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 
   button {
@@ -198,6 +200,7 @@
   <div id="nowplaying" role="region" aria-label="Now playing" hidden>
     <div class="np-label">Now playing</div>
     <div id="np-station">Nothing playing</div>
+    <p id="np-song" role="status"></p>
     <p id="np-status" role="status">Stopped.</p>
     <div class="np-controls">
       <button id="btn-toggle" class="secondary" aria-label="Play or stop">Play / Stop</button>
@@ -347,19 +350,20 @@
     <section class="block" data-screen="settings" aria-labelledby="h-settings" hidden>
       <h2 id="h-settings">Settings</h2>
       <button id="btn-voice" class="secondary full">🔊 Voice announcements: On</button>
+      <button id="btn-songvoice" class="secondary full">🎵 Song announcements: On</button>
       <div class="vol-row">
         <label for="vol2">Volume</label>
         <input type="range" id="vol2" min="0" max="100" value="80" aria-label="Volume">
       </div>
       <button id="btn-batt2" class="secondary full">🔋 Background playback help</button>
       <button id="btn-goto-sleep" class="secondary full">😴 Go to sleep timer</button>
-      <p class="hint">Metal Radio version <span id="app-version2">2.8</span>. Voice announcements use your phone's speech when it's available.</p>
+      <p class="hint">Metal Radio version <span id="app-version2">2.9</span>. Voice announcements use your phone's speech when it's available.</p>
     </section>
 
     <section class="block" data-screen="settings" aria-labelledby="h-info" hidden>
       <h2 id="h-info">App info</h2>
       <div class="info-box">
-        <p><span class="k">Version:</span> <span id="app-version">2.8</span></p>
+        <p><span class="k">Version:</span> <span id="app-version">2.9</span></p>
         <p><span class="k">Stations:</span> Featured stations are built in. The directory search uses the free, community-run radio-browser.info service.</p>
         <p><span class="k">Your data:</span> Favorites, your stations, volume, and last played station stay on this phone only.</p>
         <p><span class="k">Note:</span> Streaming needs an internet connection. If a station won't connect, try another one.</p>
@@ -389,6 +393,7 @@
       <div id="po-name">Station</div>
       <p id="po-genre"></p>
       <p id="po-status" role="status"></p>
+      <p id="po-song" role="status"></p>
       <button id="po-toggle" class="po-big" aria-label="Play or stop this station">⏹</button>
       <div class="po-sub">
         <button id="po-fav" class="po-small secondary" aria-label="Toggle favorite">☆</button>
@@ -426,31 +431,44 @@
 (function () {
   "use strict";
 
-  var APP_VERSION = "2.8";
+  var APP_VERSION = "2.9";
 
   /* Featured stream URLs verified working 2026-09-14.
      Artwork URLs verified loading 2026-09-14; img:null gets a built-in art tile.
      (SomaFM Metal Detector was dropped in v1.2: it wouldn't play for the user.) */
   var FEATURED = [
-    { name: "Metal Rock Radio", genre: "Metal / Hard rock", url: "https://kathy.torontocast.com:2800/;", img: null },
-    { name: "100 Greatest Heavy Metal", genre: "Heavy metal", url: "https://cast1.torontocast.com:4660/stream", img: "https://static.wixstatic.com/media/f361b3_a5ce07773ea14d209785044fbeb26dca~mv2.jpg" },
-    { name: "Exclusively Iron Maiden", genre: "Iron Maiden 24/7", url: "https://streaming.exclusive.radio/er/ironmaiden/icecast.audio", img: null },
-    { name: "Exclusively Metallica", genre: "Metallica 24/7", url: "https://streaming.exclusive.radio/er/metallica/icecast.audio", img: null },
-    { name: "Exclusively Black Sabbath", genre: "Black Sabbath 24/7", url: "https://streaming.exclusive.radio/er/blacksabbath/icecast.audio", img: "https://manager.uber.radio/static/uploads/station/00db5f78-23c8-40c6-86da-e0b06858e062.jpg" },
-    { name: "Exclusively Nirvana", genre: "Grunge", url: "https://streaming.exclusive.radio/er/nirvana/icecast.audio", img: null },
-    { name: "Exclusively Stone Temple Pilots", genre: "Grunge", url: "https://streaming.exclusive.radio/er/stonetemplepilots/icecast.audio", img: null },
+    { name: "Metal Rock Radio", genre: "Metal / Hard rock", url: "https://kathy.torontocast.com:2800/;", img: null,
+      np: { t: "currentsong", url: "https://kathy.torontocast.com:2800/currentsong?sid=1" } },
+    { name: "100 Greatest Heavy Metal", genre: "Heavy metal", url: "https://cast1.torontocast.com:4660/stream", img: "https://static.wixstatic.com/media/f361b3_a5ce07773ea14d209785044fbeb26dca~mv2.jpg",
+      np: { t: "currentsong", url: "https://cast1.torontocast.com:4660/currentsong?sid=1" } },
+    { name: "Exclusively Iron Maiden", genre: "Iron Maiden 24/7", url: "https://streaming.exclusive.radio/er/ironmaiden/icecast.audio", img: null,
+      np: { t: "icy", url: "https://streaming.exclusive.radio/er/ironmaiden/icecast.audio" } },
+    { name: "Exclusively Metallica", genre: "Metallica 24/7", url: "https://streaming.exclusive.radio/er/metallica/icecast.audio", img: null,
+      np: { t: "icy", url: "https://streaming.exclusive.radio/er/metallica/icecast.audio" } },
+    { name: "Exclusively Black Sabbath", genre: "Black Sabbath 24/7", url: "https://streaming.exclusive.radio/er/blacksabbath/icecast.audio", img: "https://manager.uber.radio/static/uploads/station/00db5f78-23c8-40c6-86da-e0b06858e062.jpg",
+      np: { t: "icy", url: "https://streaming.exclusive.radio/er/blacksabbath/icecast.audio" } },
+    { name: "Exclusively Nirvana", genre: "Grunge", url: "https://streaming.exclusive.radio/er/nirvana/icecast.audio", img: null,
+      np: { t: "icy", url: "https://streaming.exclusive.radio/er/nirvana/icecast.audio" } },
+    { name: "Exclusively Stone Temple Pilots", genre: "Grunge", url: "https://streaming.exclusive.radio/er/stonetemplepilots/icecast.audio", img: null,
+      np: { t: "icy", url: "https://streaming.exclusive.radio/er/stonetemplepilots/icecast.audio" } },
     { name: "Best Of Rock.FM Hard Rock", genre: "Hard rock", url: "https://bestofrockfm.stream.vip/hardrock/mp3-256/bestofrock.fm/", img: "https://www.best-of-rock.fm/favicons/apple-touch-icon.png" },
     { name: "Rock Antenne Grunge", genre: "Grunge", url: "https://stream.rockantenne.de/grunge/stream/mp3", img: "https://www.rockantenne.de/logos/station-rock-antenne/apple-touch-icon.png" },
     { name: "181.FM The Rock!", genre: "Hard rock", url: "https://listen.181fm.com/181-hardrock_128k.mp3", img: "https://www.181.fm/favicon.ico" },
-    { name: "Exclusively Guns N' Roses", genre: "Guns N' Roses 24/7", url: "https://streaming.exclusive.radio/er/gunsnroses/icecast.audio", img: null },
-    { name: "Megarock Radio 320k", genre: "Metal / Hard rock", url: "https://stream3.megarockradio.net:80/", img: null },
+    { name: "Exclusively Guns N' Roses", genre: "Guns N' Roses 24/7", url: "https://streaming.exclusive.radio/er/gunsnroses/icecast.audio", img: null,
+      np: { t: "icy", url: "https://streaming.exclusive.radio/er/gunsnroses/icecast.audio" } },
+    { name: "Megarock Radio 320k", genre: "Metal / Hard rock", url: "https://stream3.megarockradio.net:80/", img: null,
+      np: { t: "icecast", url: "https://stream3.megarockradio.net/status-json.xsl" } },
     { name: "Rock Antenne Heavy Metal", genre: "Heavy metal", url: "https://stream.rockantenne.de/heavy-metal/stream/mp3", img: "https://www.rockantenne.de/logos/station-rock-antenne/apple-touch-icon.png" },
     { name: "Best Of Rock.FM Alternative Rock", genre: "Alternative rock", url: "https://bestofrockfm.stream.vip/altrock/mp3-256/bestofrock.fm/", img: "https://www.best-of-rock.fm/favicons/apple-touch-icon.png" },
-    { name: "RdMix Classic Rock", genre: "Classic rock", url: "https://cast1.torontocast.com:4610/stream", img: "https://static.wixstatic.com/media/f361b3_1bad7e5fb9a54196b2ac2c2fe71d6e4f~mv2.jpg" },
-    { name: "SomaFM Doomed", genre: "Doom metal", url: "https://ice5.somafm.com/doomed-256-mp3", img: null },
-    { name: "Mosh Head Black Metal", genre: "Black metal", url: "https://moshhead-blackmetal.stream.laut.fm/moshhead-blackmetal", img: null },
+    { name: "RdMix Classic Rock", genre: "Classic rock", url: "https://cast1.torontocast.com:4610/stream", img: "https://static.wixstatic.com/media/f361b3_1bad7e5fb9a54196b2ac2c2fe71d6e4f~mv2.jpg",
+      np: { t: "currentsong", url: "https://cast1.torontocast.com:4610/currentsong?sid=1" } },
+    { name: "SomaFM Doomed", genre: "Doom metal", url: "https://ice5.somafm.com/doomed-256-mp3", img: null,
+      np: { t: "somafm", id: "doomed" } },
+    { name: "Mosh Head Black Metal", genre: "Black metal", url: "https://moshhead-blackmetal.stream.laut.fm/moshhead-blackmetal", img: null,
+      np: { t: "laut", id: "moshhead-blackmetal" } },
     { name: "12PUNKS.FM", genre: "Punk", url: "https://12punks-high.rautemusik.fm/?ref=radiobrowser", img: null },
-    { name: "Labgate Grunge", genre: "Grunge", url: "https://s2.ssl-stream.com/listen/labgate_alt_rock_grunge/radio.mp3", img: null }
+    { name: "Labgate Grunge", genre: "Grunge", url: "https://s2.ssl-stream.com/listen/labgate_alt_rock_grunge/radio.mp3", img: null,
+      np: { t: "azuracast", url: "https://s2.ssl-stream.com/api/nowplaying/labgate_alt_rock_grunge" } }
   ];
 
   var RB_API = "https://de1.api.radio-browser.info/json";
@@ -508,10 +526,46 @@
   var npStation = document.getElementById("np-station");
   var npStatus = document.getElementById("np-status");
   var voiceOn = store.get("mr_voice", true);
+  var songVoice = store.get("mr_songvoice", true);
+
+  /* Native audio bridge (APK): when the app runs inside the Android wrapper,
+     playback goes through a foreground service so music keeps playing with
+     the screen off. In a desktop browser the bridge is absent and the
+     built-in <audio> element is used instead. */
+  function nativeRadio() {
+    try {
+      return (window.LynxosRadio && typeof window.LynxosRadio.play === "function") ? window.LynxosRadio : null;
+    } catch (e) { return null; }
+  }
+  function isPlayingOut() {
+    if (nativeRadio()) return !!current;
+    try { return !!current && !audio.paused; } catch (e) { return !!current; }
+  }
+  function stopAudioOut() {
+    var nr = nativeRadio();
+    if (nr) { try { nr.stop(); } catch (e) {} }
+    try { audio.pause(); } catch (e) {}
+  }
+  /* Called from native code when the foreground service hits a stream error. */
+  window.mrNativeError = function () {
+    if (current) {
+      var name = current.name;
+      current = null;
+      stopNpPoll();
+      setSongText("");
+      setStatus("Couldn't connect to " + name + ". Try another station.");
+      speak("Couldn't connect to " + name + ". Try another station.");
+      markPlayingCard();
+      updateNpVisibility();
+      if (playerOpen) syncOverlayPlayState();
+    }
+  };
 
   function applyVolume(v) {
     v = Math.max(0, Math.min(100, parseInt(v, 10) || 0));
     audio.volume = v / 100;
+    var nr = nativeRadio();
+    if (nr) { try { nr.setVolume(v / 100); } catch (e) {} }
     document.getElementById("vol").value = v;
     document.getElementById("vol2").value = v;
     document.getElementById("po-vol").value = v;
@@ -806,7 +860,7 @@
   }
 
   function syncOverlayPlayState() {
-    var playing = !!(current && !audio.paused);
+    var playing = isPlayingOut();
     var mine = !!(playerStation && current && playerStation.url === current.url && playing);
     poToggle.textContent = mine ? "\u23F9" : "\u25B6";
     poToggle.setAttribute("aria-label", mine ? "Stop " + playerStation.name : "Play " + playerStation.name);
@@ -844,7 +898,7 @@
   document.getElementById("po-close").addEventListener("click", function () { closePlayer(false); });
   poToggle.addEventListener("click", function () {
     if (!playerStation) return;
-    if (current && current.url === playerStation.url && !audio.paused) stopPlayback();
+    if (current && current.url === playerStation.url && isPlayingOut()) stopPlayback();
     else playStation(playerStation.name, playerStation.url);
   });
   poFav.addEventListener("click", function () {
@@ -876,11 +930,11 @@
     if (playerOpen) poStatus.textContent = t;
   }
 
-  function updateMediaSession(name) {
+  function updateMediaSession(title, artist) {
     try {
       if ("mediaSession" in navigator) {
         navigator.mediaSession.metadata = new MediaMetadata({
-          title: name, artist: "Metal Radio", album: "Live stream"
+          title: title || "Metal Radio", artist: artist || "Metal Radio", album: "Live stream"
         });
       }
     } catch (e) {}
@@ -893,35 +947,194 @@
     lastStation = { name: name, url: url };
     store.set("last", lastStation);
     npStation.textContent = name;
+    setSongText("");
     setStatus("Connecting to " + name + "...");
-    try { audio.pause(); } catch (e) {}
-    audio.src = url;
-    try { audio.load(); } catch (e) {}
-    var p = audio.play();
-    if (p && typeof p.catch === "function") {
-      p.catch(function () {
-        setStatus("Couldn't start " + name + ". Try again.");
-        speak("Couldn't start " + name + ".");
-      });
+    var nr = nativeRadio();
+    stopAudioOut();
+    if (nr) {
+      try { nr.play(url); } catch (e) {}
+      setStatus("Playing: " + name);
+      speak("Playing " + name + ".");
+    } else {
+      audio.src = url;
+      try { audio.load(); } catch (e) {}
+      var p = audio.play();
+      if (p && typeof p.catch === "function") {
+        p.catch(function () {
+          setStatus("Couldn't start " + name + ". Try again.");
+          speak("Couldn't start " + name + ".");
+        });
+      }
     }
-    updateMediaSession(name);
+    updateMediaSession(name, "Metal Radio");
     markPlayingCard();
     updateNpVisibility();
     if (playerOpen) syncOverlayPlayState();
+    startNpPoll();
   }
 
   function stopPlayback(quiet) {
-    try { audio.pause(); } catch (e) {}
+    stopAudioOut();
     try { audio.removeAttribute("src"); audio.load(); } catch (e) {}
     current = null;
+    stopNpPoll();
     if (!quiet) {
       npStation.textContent = "Nothing playing";
+      setSongText("");
       setStatus("Stopped.");
       speak("Stopped.");
     }
     markPlayingCard();
     updateNpVisibility();
     if (playerOpen) syncOverlayPlayState();
+  }
+
+  /* ---------- now-playing song info ---------- */
+  var npTimerId = null;
+  var npLastSong = "";
+  function setSongText(t) {
+    npLastSong = t || "";
+    var s = document.getElementById("np-song");
+    if (s) s.textContent = t || "";
+    var ps = document.getElementById("po-song");
+    if (ps) ps.textContent = t || "";
+  }
+  function cleanSong(t) {
+    t = String(t || "").replace(/\s+/g, " ").trim();
+    if (t.length > 120) t = t.slice(0, 117) + "...";
+    return t;
+  }
+  function fetchWithTimeout(url, ms, opts) {
+    try {
+      if (typeof AbortController !== "undefined") {
+        var c = new AbortController();
+        var tid = setTimeout(function () { try { c.abort(); } catch (e) {} }, ms);
+        var o = { signal: c.signal };
+        if (opts) for (var k in opts) o[k] = opts[k];
+        return fetch(url, o).then(
+          function (r) { clearTimeout(tid); return r; },
+          function (e) { clearTimeout(tid); throw e; });
+      }
+    } catch (e) {}
+    return fetch(url, opts);
+  }
+  /* Read one ICY metadata block from a Shoutcast/Icecast-compatible stream and
+     pull out StreamTitle. The extra connection is closed after the first block. */
+  function fetchIcyTitle(streamUrl) {
+    return fetchWithTimeout(streamUrl, 15000, { headers: { "Icy-MetaData": "1" } }).then(function (resp) {
+      var metaint = 0;
+      try { metaint = parseInt(resp.headers.get("icy-metaint") || "0", 10) || 0; } catch (e) {}
+      if (!metaint || !resp.body || typeof resp.body.getReader !== "function") throw new Error("no icy");
+      var reader = resp.body.getReader();
+      var buf = new Uint8Array(0);
+      function pump() {
+        return reader.read().then(function (r) {
+          if (r.done) throw new Error("no icy");
+          var nb = new Uint8Array(buf.length + r.value.length);
+          nb.set(buf); nb.set(r.value, buf.length); buf = nb;
+          var pos = 0;
+          while (buf.length >= pos + metaint + 1) {
+            var metaLen = buf[pos + metaint] * 16;
+            if (buf.length < pos + metaint + 1 + metaLen) break;
+            if (metaLen > 0) {
+              var chars = buf.subarray(pos + metaint + 1, pos + metaint + 1 + metaLen);
+              var meta = "";
+              for (var i = 0; i < chars.length; i++) meta += String.fromCharCode(chars[i]);
+              try { reader.cancel(); } catch (e) {}
+              var m = /StreamTitle='([^']*)'/.exec(meta);
+              return (m && m[1]) ? m[1] : null;
+            }
+            pos += metaint + metaLen + 1;
+          }
+          if (buf.length > 262144) { try { reader.cancel(); } catch (e) {} throw new Error("no icy"); }
+          return pump();
+        });
+      }
+      return pump();
+    });
+  }
+  function npFetchText(cfg) {
+    try {
+      if (!cfg || !cfg.np) return Promise.resolve(null);
+      var np = cfg.np;
+      if (np.t === "currentsong") {
+        return fetchWithTimeout(np.url, 10000).then(function (r) { return r.text(); })
+          .then(function (t) { t = cleanSong(t); return t || null; });
+      }
+      if (np.t === "somafm") {
+        return fetchWithTimeout("https://somafm.com/channels.json", 10000).then(function (r) { return r.json(); })
+          .then(function (d) {
+            var chs = (d && d.channels) || [];
+            for (var i = 0; i < chs.length; i++) {
+              if (chs[i].id === np.id) { var t = cleanSong(chs[i].lastPlaying); return t || null; }
+            }
+            return null;
+          });
+      }
+      if (np.t === "laut") {
+        return fetchWithTimeout("https://api.laut.fm/station/" + np.id + "/current_song", 10000)
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            var a = d && d.artist && d.artist.name, t = d && d.title;
+            if (a && t) return cleanSong(a + " - " + t);
+            return cleanSong(t) || null;
+          });
+      }
+      if (np.t === "azuracast") {
+        return fetchWithTimeout(np.url, 10000).then(function (r) { return r.json(); })
+          .then(function (d) {
+            var s = d && d.now_playing && d.now_playing.song;
+            if (!s || !s.title) return null;
+            var txt = s.artist ? s.artist + " - " + s.title : s.title;
+            return cleanSong(txt) || null;
+          });
+      }
+      if (np.t === "icecast") {
+        return fetchWithTimeout(np.url, 10000).then(function (r) { return r.json(); })
+          .then(function (d) {
+            var src = d && d.icestats && d.icestats.source;
+            if (!src) return null;
+            var arr = Object.prototype.toString.call(src) === "[object Array]" ? src : [src];
+            for (var i = 0; i < arr.length; i++) {
+              if (arr[i] && arr[i].title) { var t = cleanSong(arr[i].title); if (t) return t; }
+            }
+            return null;
+          });
+      }
+      if (np.t === "icy") {
+        return fetchIcyTitle(np.url).then(function (t) { t = cleanSong(t); return t || null; });
+      }
+    } catch (e) {}
+    return Promise.resolve(null);
+  }
+  function stopNpPoll() {
+    if (npTimerId) { clearInterval(npTimerId); npTimerId = null; }
+  }
+  function refreshNpSong() {
+    if (!current) return;
+    var cfg = null;
+    try { cfg = findStation(current.url); } catch (e) {}
+    if (!cfg || !cfg.np) {
+      if (!npLastSong) setSongText("This station doesn't publish song info.");
+      return;
+    }
+    npFetchText(cfg).then(function (t) {
+      if (!current) return;
+      if (t && t !== npLastSong) {
+        setSongText("\u266B " + t);
+        updateMediaSession(t, current.name);
+        if (songVoice) speak("Now playing: " + t + ".");
+      } else if (!t && !npLastSong) {
+        setSongText("Song info isn't available right now.");
+      }
+    }, function () {
+      if (current && !npLastSong) setSongText("Song info isn't available right now.");
+    });
+  }
+  function startNpPoll() {
+    stopNpPoll();
+    refreshNpSong();
+    npTimerId = setInterval(refreshNpSong, 25000);
   }
 
   audio.addEventListener("playing", function () {
@@ -947,7 +1160,7 @@
   });
 
   document.getElementById("btn-toggle").addEventListener("click", function () {
-    if (current && !audio.paused) stopPlayback();
+    if (current && isPlayingOut()) stopPlayback();
     else if (lastStation) {
       var s = findStation(lastStation.url);
       openPlayer(lastStation.name, lastStation.url, s ? s.img : null, s ? s.genre : "");
@@ -1084,8 +1297,11 @@
         if (preFadeVol !== null) { applyVolume(preFadeVol); preFadeVol = null; }
         npStation.textContent = "Nothing playing";
         setStatus("Sleep timer ended. Stopped.");
-        try { audio.pause(); } catch (e) {}
+        stopAudioOut();
+        try { audio.removeAttribute("src"); audio.load(); } catch (e) {}
         current = null;
+        stopNpPoll();
+        setSongText("");
         markPlayingCard();
         updateNpVisibility();
         sleepStatus.textContent = "Sleep timer is off.";
@@ -1603,6 +1819,17 @@
     updateVoiceBtn();
     if (voiceOn) speak("Voice announcements on.");
   });
+  function updateSongVoiceBtn() {
+    document.getElementById("btn-songvoice").textContent = songVoice ? "🎵 Song announcements: On" : "🎵 Song announcements: Off";
+  }
+  document.getElementById("btn-songvoice").addEventListener("click", function () {
+    songVoice = !songVoice;
+    store.set("mr_songvoice", songVoice);
+    updateSongVoiceBtn();
+    if (songVoice) speak("Song announcements on. I'll name each new song.");
+    else speak("Song announcements off.");
+  });
+  updateSongVoiceBtn();
   document.getElementById("btn-batt2").addEventListener("click", function () {
     battDlg.hidden = false;
     speak("Background playback help.");
