@@ -62,14 +62,44 @@
   body.tv ul.station-grid { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; }
   body.tv li.station-card.playing { border-width: 4px; }
   body.tv input, body.tv select { font-size: 24px; min-height: 72px; }
-  /* TV player overlay: fill more of the 10-foot screen */
-  body.tv .po-card { max-width: 640px; }
-  body.tv .po-art { width: min(40vh, 320px); }
-  body.tv #po-name { font-size: 40px; }
-  body.tv #po-genre { font-size: 24px; }
-  body.tv #po-status { font-size: 24px; }
-  body.tv #po-song { font-size: 30px; }
-  body.tv .po-big { width: 150px; height: 150px; min-height: 150px; font-size: 60px; }
+  /* TV player overlay: fit the whole player on screen and respect TV overscan.
+     The old 150px button + 40vh art + big fonts overflowed the viewport, and
+     flex centering then chopped the top off. margin:auto centers when the card
+     fits and top-aligns it when it doesn't, so the art can never be cut. */
+  body.tv #player-overlay { padding: 4vh 6vw; }
+  body.tv .po-card { margin: auto; width: 100%; max-width: 560px; max-height: 92vh;
+    display: flex; flex-direction: column; align-items: center; }
+  body.tv .po-art { height: min(28vh, 300px); width: auto; flex: 0 1 auto; min-height: 0; margin: 0 auto; }
+  body.tv #po-name { font-size: 34px; margin: 1.5vh 0 0.5vh; }
+  body.tv #po-genre { font-size: 20px; margin: 0 0 0.5vh; }
+  body.tv #po-status { font-size: 20px; min-height: 0; margin: 0 0 1vh; }
+  body.tv #po-song { font-size: 24px; min-height: 0; margin: 0 0 1vh; }
+  body.tv .po-big { width: min(110px, 15vh); height: min(110px, 15vh); min-height: 0; font-size: 48px; margin: 1vh auto; }
+  body.tv .po-sub { margin: 1vh 0; gap: 18px; }
+  body.tv .po-small { width: min(72px, 10vh); height: min(72px, 10vh); min-height: 0; font-size: 30px; }
+  body.tv .vol-row { margin: 1vh 0 0; width: 100%; }
+  body.tv .po-x { width: 64px; height: 64px; min-height: 64px; font-size: 28px; }
+  /* TV: no bottom tab bar — the remote opens the side menu with the left arrow. */
+  body.tv .tabbar { display: none; }
+  /* TV: the star on each station card kept stealing D-pad focus on the way to
+     the station. Favorites moved into the player (its star button is still
+     there). Custom stations keep their delete button. */
+  body.tv li.station-card .fav-btn { display: none; }
+  body.tv li.station-card.deletable .fav-btn { display: block; }
+  /* TV side menu, opened with the left arrow key at the screen's left edge */
+  #tv-menu { display: none; }
+  body.tv #tv-menu {
+    display: flex; flex-direction: column; gap: 12px;
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: 85;
+    width: min(430px, 72vw); background: #0a0a0a;
+    border-right: 3px solid #ffd60a; padding: 5vh 26px;
+    transform: translateX(-106%); visibility: hidden;
+    transition: transform 0.22s ease, visibility 0s linear 0.22s;
+  }
+  body.tv #tv-menu.open { transform: none; visibility: visible; transition: transform 0.22s ease; }
+  body.tv #tv-menu h2 { font-size: 32px; color: #ffd60a; margin: 0 0 10px 0; }
+  body.tv #tv-menu button { text-align: left; }
+  body.tv #tv-menu .tv-menu-hint { color: #999; font-size: 20px; margin: auto 0 0 0; }
   body.tv .po-small { width: 92px; height: 92px; min-height: 92px; font-size: 40px; }
   body.tv .po-x { width: 76px; height: 76px; min-height: 76px; font-size: 30px; }
   /* TV: battery help doesn't exist on televisions — remove it entirely */
@@ -411,6 +441,16 @@
     <button id="tab-settings" data-screen="settings"><span class="t-ico">⚙️</span><span class="t-lab">Settings</span></button>
   </nav>
 
+  <nav id="tv-menu" aria-label="TV menu">
+    <h2>Menu</h2>
+    <button type="button" data-tv-screen="home">&#x1F3E0; Home</button>
+    <button type="button" data-tv-screen="find">&#x1F50E; Find stations</button>
+    <button type="button" data-tv-shuffle>&#x1F500; Surprise me</button>
+    <button type="button" data-tv-screen="fun">&#x1F3AE; Fun zone</button>
+    <button type="button" data-tv-screen="settings">&#x2699;&#xFE0F; Settings</button>
+    <p class="tv-menu-hint">Tip: press the left arrow at the screen's edge anytime to open this menu.</p>
+  </nav>
+
   <div id="player-overlay" hidden>
     <div class="po-card" role="dialog" aria-modal="true" aria-label="Station player">
       <button id="po-close" class="po-x" aria-label="Close player">✕</button>
@@ -461,7 +501,7 @@
 (function () {
   "use strict";
 
-  var APP_VERSION = "2.9.6";
+  var APP_VERSION = "2.9.7";
 
   /* TV mode: Fire TV (AFT*), Android TV / Google TV remotes drive D-pad focus.
      Enlarge the UI and strengthen the focus ring when running on a television. */
@@ -665,7 +705,7 @@
   function stationCard(name, genre, url, img, opts) {
     opts = opts || {};
     var li = document.createElement("li");
-    li.className = "station-card";
+    li.className = "station-card" + (opts.deletable ? " deletable" : "");
     li.setAttribute("data-url", url);
 
     var play = document.createElement("button");
@@ -955,6 +995,13 @@
 
   window.addEventListener("popstate", function () {
     if (playerOpen) { closePlayer(true); return; }
+    if (tvMenuOpen()) {
+      closeTvMenu();
+      var mst = null;
+      try { mst = history.state; } catch (e) {}
+      showScreen((mst && mst.mrscreen) ? mst.mrscreen : "home", true);
+      return;
+    }
     var st = null;
     try { st = history.state; } catch (e) {}
     showScreen((st && st.mrscreen) ? st.mrscreen : "home", true);
@@ -1959,6 +2006,67 @@
   document.getElementById("tab-fun").addEventListener("click", function () { showScreen("fun"); });
   document.getElementById("tab-settings").addEventListener("click", function () { showScreen("settings"); });
   document.getElementById("tab-shuffle").addEventListener("click", function () { doShuffle(); });
+
+  /* ---------- TV side menu (the bottom tab bar is hidden on TV) ---------- */
+  var tvMenu = document.getElementById("tv-menu");
+  function tvMenuOpen() { return !!(tvMenu && tvMenu.classList.contains("open")); }
+  function openTvMenu() {
+    if (!tvMenu || typeof IS_TV === "undefined" || !IS_TV) return;
+    tvMenu.classList.add("open");
+    var cur = null;
+    try { cur = history.state && history.state.mrscreen; } catch (e) {}
+    var items = tvMenu.querySelectorAll("button");
+    var target = items[0];
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].getAttribute("data-tv-screen") === cur) { target = items[i]; break; }
+    }
+    try { if (target) target.focus(); } catch (e) {}
+    speak("Menu open. Choose a section.");
+  }
+  function closeTvMenu() {
+    if (!tvMenu) return;
+    tvMenu.classList.remove("open");
+  }
+  if (tvMenu) {
+    tvMenu.addEventListener("click", function (e) {
+      var scr = e.target.closest("[data-tv-screen]");
+      if (scr) {
+        var name = scr.getAttribute("data-tv-screen");
+        closeTvMenu();
+        showScreen(name);
+        /* hand the remote's focus to the new screen's first control */
+        try {
+          var sec = document.querySelector('section.block[data-screen="' + name + '"]:not([hidden])');
+          var first = sec ? sec.querySelector("button, input, select, a[href]") : null;
+          if (first) first.focus();
+        } catch (err) {}
+        return;
+      }
+      if (e.target.closest("[data-tv-shuffle]")) {
+        closeTvMenu();
+        doShuffle();
+      }
+    });
+  }
+  /* Left arrow at the screen's left edge opens the TV menu; left arrow while
+     the menu is open closes it. Never fires inside the player or text fields,
+     so normal left/right station browsing is untouched. */
+  document.addEventListener("keydown", function (e) {
+    if (typeof IS_TV === "undefined" || !IS_TV) return;
+    if (e.key !== "ArrowLeft") return;
+    if (playerOpen) return;
+    if (tvMenuOpen()) { closeTvMenu(); e.preventDefault(); return; }
+    var ae = document.activeElement;
+    if (!ae || !ae.getBoundingClientRect) return;
+    var tag = (ae.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") return;
+    if (tvMenu && tvMenu.contains(ae)) return;
+    var r = ae.getBoundingClientRect();
+    if (r.width > 0 && r.left < window.innerWidth * 0.18) {
+      e.preventDefault();
+      openTvMenu();
+    }
+  });
 
   /* ---------- init ---------- */
   try { history.replaceState({ mrscreen: "home" }, ""); } catch (e) {}
