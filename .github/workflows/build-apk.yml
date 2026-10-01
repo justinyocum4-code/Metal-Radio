@@ -27,8 +27,8 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     env:
-      APP_VERSION_NAME: ${{ inputs.version_name || '2.9.1' }}
-      APP_VERSION_CODE: ${{ inputs.version_code || '4' }}
+      APP_VERSION_NAME: ${{ inputs.version_name || '2.9.2' }}
+      APP_VERSION_CODE: ${{ inputs.version_code || '5' }}
       APP_RELEASE_NOTES: ${{ inputs.release_notes || 'Update' }}
     steps:
       - name: Check out code
@@ -121,13 +121,16 @@ jobs:
               <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <application
                   android:label="Metal Radio"
                   android:theme="@android:style/Theme.Material.Light.NoActionBar">
                   <activity
                       android:name="com.metalradio.app.MainActivity"
                       android:exported="true"
-                      android:windowSoftInputMode="adjustResize">
+                      android:windowSoftInputMode="adjustResize"
+                      android:configChanges="orientation|screenSize|keyboardHidden">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
@@ -282,7 +285,7 @@ jobs:
                               } else {
                                   startService(i);
                               }
-                          } catch (Exception e) {
+                          } catch (Throwable e) {
                               notifyRadioError();
                           }
                       }
@@ -418,8 +421,13 @@ jobs:
                   }
                   String action = intent.getAction();
                   if (ACTION_PLAY.equals(action)) {
-                      goForeground();
-                      playUrl(intent.getStringExtra(EXTRA_URL));
+                      if (goForeground()) {
+                          playUrl(intent.getStringExtra(EXTRA_URL));
+                      } else {
+                          stopPlayback();
+                          reportError();
+                          stopSelf();
+                      }
                   } else if (ACTION_STOP.equals(action)) {
                       stopPlayback();
                       try { stopForeground(true); } catch (Exception ignored) {}
@@ -451,7 +459,7 @@ jobs:
                   }
               }
 
-              private void goForeground() {
+              private boolean goForeground() {
                   try {
                       Intent open = new Intent(this, MainActivity.class);
                       open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -477,7 +485,9 @@ jobs:
                       } else {
                           startForeground(NOTIF_ID, n);
                       }
-                  } catch (Exception ignored) {}
+                      return true;
+                  } catch (Throwable ignored) {}
+                  return false;
               }
 
               private void playUrl(final String url) {
