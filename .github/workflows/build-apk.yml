@@ -27,8 +27,8 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     env:
-      APP_VERSION_NAME: ${{ inputs.version_name || '2.9.5' }}
-      APP_VERSION_CODE: ${{ inputs.version_code || '8' }}
+      APP_VERSION_NAME: ${{ inputs.version_name || '2.9.6' }}
+      APP_VERSION_CODE: ${{ inputs.version_code || '9' }}
       APP_RELEASE_NOTES: ${{ inputs.release_notes || 'Update' }}
     steps:
       - name: Check out code
